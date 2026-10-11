@@ -185,7 +185,7 @@ def _result_view(r: Result, charts: bool = False, sensitivity: dict | None = Non
     if "execution_fees" in m:
         disclosures.append(
             f"execution_fees 是引擎逐笔成交记录中实际扣除的费用合计，单位 {r.plan.market.currency}；"
-            "包含期末强制平仓费用，不包含滑点损耗或独立资金费用；这些费用已计入净值，不应再次扣减收益。"
+            "包含回测最后一天平仓的费用（卖不出去、留着按市值计的持仓不扣卖出费用），不包含滑点损耗或独立资金费用；这些费用已计入净值，不应再次扣减收益。"
             "滑点通过引擎成交价格模型反映在净值中，不属于 execution_fees，不代表回测未计滑点。"
         )
     if benchmark_is_self:
@@ -198,6 +198,16 @@ def _result_view(r: Result, charts: bool = False, sensitivity: dict | None = Non
         disclosures.append(
             f"{sym} 在 {s['from']} 至 {s['to']} 之间有 {s['bars']} 个交易日超过补齐上限仍没有报价（停牌或数据源缺行），"
             "持仓按最后一个收盘价估值；这几天的净值、回撤和下单规模不反映它的真实涨跌。")
+    # 期末卖不出去的持仓并成一条（披露条数和单条长度都有上限，不能一只一条）
+    unsettled: dict[str, list[str]] = {}
+    for sym, reason in sorted((m.get("unsettled_positions") or {}).items()):
+        unsettled.setdefault(reason, []).append(sym)
+    if unsettled:
+        parts = [f"{'、'.join(syms[:5])}{f' 等 {len(syms)} 只' if len(syms) > 5 else ''}（{reason}）"
+                 for reason, syms in unsettled.items()]
+        disclosures.append(
+            f"回测最后一天有 {sum(map(len, unsettled.values()))} 只持仓没有平仓：{'；'.join(parts)}。"
+            "这些持仓按最后一天收盘价计入期末净值、没扣卖出费用；胜率、盈亏比、交易次数等按平仓记录算的指标不含它们。")
     turnover = m.get("total_turnover")
     if isinstance(turnover, (int, float)) and turnover < 1:
         disclosures.append(

@@ -5,12 +5,12 @@
  * 但只活在硬测试里(`hardtest.ts` 的 judgeDisplayFidelity)。生产 `validateReport` 当时只查
  * "章节在不在、引用 id 存不存在" —— **不查数字是否等于所引 id 的值**。
  * 后果:报告可以引用一个**真实的 calc-id 却写另一个数字**,仍然判 complete。
- * 对一个金融研究产品来说,这是最不能留的缺口。
+ * 对一个研究产品来说,这是最不能留的缺口。
  * ⇒ 把它抽成共享模块,**生产 validator 与硬测试用同一份实现**(而不是复制两份各自漂移)。
  *
  * ⚠️ 下面这些正则里的每一条豁免,都对应一次真实误伤(速率标签 1.6T、公告文号、HTTP 状态码、
  * 域名里的数字、时间窗口标签、主体编号…)。**改它们之前先看注释,不要"清理"掉。**
- * 领域相关的那部分词表已移入 Plugin(金融的见 `finance/lexicon.ts`),这里只留机制。
+ * 领域相关的那部分词表已移入 Plugin(finance 包的见 `finance/lexicon.ts`),这里只留机制。
  */
 /**
  * 只声明**本模块真正用到的字段**,不绑死 merge.ts 或 hardtest 的完整类型 ——
@@ -125,6 +125,18 @@ export function unitBound(token: number, written: WrittenScale, pool: { v: numbe
     return Math.abs(w - token) <= tol || Math.abs(Math.round(w * 100) / 100 - token) <= tol;
   }));
 }
+/**
+ * 按**写出来的位数**精确对:证据值换算到写的量级后,四舍五入到报告写的小数位,必须正好等于写的数。
+ * 给「同行没引 id」的数字用 —— 那时候候选池是整次运行的全部证据(上千个值),
+ * numberBound 的千分之二容差会让 17%~42% 的随机数碰巧对上(2026-10-11 在 9 份真实报告的证据上实测)。
+ */
+export function writtenExact(token: number, decimals: number, written: WrittenScale | null, pool: { v: number; scale: EvidenceScale }[]): boolean {
+  const f = 10 ** decimals;
+  return pool.some(({ v, scale }) => (written === null ? [1] : scalesFor(written, scale)).some((s) => {
+    const w = v * s;
+    return Number.isFinite(w) && Math.abs(Math.round(w * f) / f - token) < 0.5 / f / 10;
+  }));
+}
 export function numberBound(token: number, pool: number[], relTol = 2e-3): boolean {
   return pool.some((v) => SCALES.some((s) => { const w = v * s; if (!Number.isFinite(w)) return false; const tol = Math.max(Math.abs(token) * relTol, relTol * 2.5); return Math.abs(w - token) <= tol || Math.abs(Math.round(w * 100) / 100 - token) <= tol; }));
 }
@@ -134,7 +146,7 @@ export function claimNumbers(line: string, symbol?: string): number[] { return c
 /** 数字及其书写形态(含紧随的单位字符,用于在字符串证据——如公告标题——里做原文匹配) */
 /**
  * **领域词表契约**(Plugin 的一个插槽)。机制通用、词表随垂类而变 ——
- * 金融的在 `finance/lexicon.ts`;餐饮 AgentOS 会提供完全不同的一份。
+ * finance 包的在 `finance/lexicon.ts`;餐饮 AgentOS 会提供完全不同的一份。
  */
 export interface Lexicon {
   //! 契约:所有正则必须是**原生 RegExp 字面量 / `new RegExp(...)`**,不许是子类、Proxy、
@@ -172,8 +184,8 @@ let registeredSource: Lexicon | null = null;
 /**
  * 注册领域词表。**同一进程只允许一份** —— 换成另一份会当场抛错。
  *
- * 🔴 为什么要拦:这是**进程级单例**,先注册金融包再注册餐饮包会静默覆盖,
- * 之后金融请求会拿餐饮词表去判数字,结果取决于注册顺序(Codex lexicon-r1 P1)。
+ * 🔴 为什么要拦:这是**进程级单例**,先注册 A 包再注册 B 包会静默覆盖,
+ * 之后 A 的请求会拿 B 的词表去判数字,结果取决于注册顺序(Codex lexicon-r1 P1)。
  * 真正的解法是把词表做成**实例级依赖**、从 composition root 一路传下去(见文件末尾的"待办")。
  * 在那之前,**把静默串包变成当场失败** —— 这条纪律在本产品里比"能跑"更重要。
  *
@@ -182,7 +194,7 @@ let registeredSource: Lexicon | null = null;
  *   它们有 `lastIndex` 状态,共享后反复 test 会交替命中 / 漏掉;
  * - 给 `.replace()` 用的(subjectCodePatterns / windowLabelPattern)**必须带 `g`** ——
  *   不带只会替换第一处,一行里出现两个主体编号时第二个剥不掉。
- * (我一度按"一律禁 g"实现,立刻被既有测试打红:金融包那两条本来就必须带 g。)
+ * (我一度按"一律禁 g"实现,立刻被既有测试打红:finance 包那两条本来就必须带 g。)
  */
 const TEST_FIELDS = ["moneyBefore", "moneyAfter", "categoryLabelContext"] as const;
 
@@ -313,6 +325,9 @@ export function claimTokens(line: string, symbol?: string, lex: Lexicon = curren
   const mask = (m: string) => " ".repeat(m.length);
   const sourceLine = line;
   line = line.replace(/\d{4}-\d{2}-\d{2}[\sT]{0,3}\d{1,2}:\d{2}(?::\d{2})?/g, mask);
+  // 用户资料引用 [资料:<32 位编号> p.3] 整个剥掉:编号里的「48610」「7e8」不是数字主张,遮了引用就坏了(v2.2.0 审计 Opus 第 1 条);
+  // 点分日期 2026.10.11 也剥掉 —— 带两个点的不可能是一个数,不剥会读出 2026.10
+  line = line.replace(/\[资料:[^\]\n]*\]/g, mask).replace(/(?<![\d.])(?:19|20)\d{2}\.\d{1,2}\.\d{1,2}(?![\d.])/g, mask);
   let s = stripSpeedLabels(line.replace(/https?:\/\/[^\s)\]]+/g, mask).replace(/(HTTP|状态码|status)\s?[1-5]\d{2}(?!\d)/gi, mask).replace(/(?<![\d.])(19|20)\d{2}-\d{3,6}(?![\d.-])/g, mask).replace(/(?<![\d.])1260H\b/g, mask).replace(/(?<![\w.])[\w-]+(?:\.[\w-]+)*\.(?:com|cn|net|org|io|co|hk|tw|jp|kr|de|uk|info|biz|tv|me|ai|app)(?:\.[a-z]{2})?(?![\w.])/gi, mask)).replace(/(ev-[0-9a-f]{6,}|calc-[0-9a-f]{16})(?![0-9a-zA-Z_])/g, mask).replace(/\d{4}-\d{2}-\d{2}/g, mask).replace(/\d{4}Q[1-4]|\d{4}H[12]/g, mask)
     .replace(/FY\s?\d{4}/g, mask).replace(/(?<![\d.])(19|20)\d{2}(?![\d.])\s*[年]?/g, mask)// 主体编号默认剥掉,**但后面紧跟单位就是真数字**(踩坑实例见 finance/lexicon.ts)
     // 主体编号剥离的条件由 Plugin 的 subjectCodePatterns 给出,或**等于本次运行的主体编号**。
@@ -405,9 +420,19 @@ export const PROSE_BEFORE = /(近|过去|未来|连续|第|每|共|约|前|后|�
 /**
  * 中文用**方向词**承载正负号:证据值是 -1.92,报告写"下降 1.92 美元/卡时"是正确写法,
  * 不是丢了符号(实测这类占误报的一大半)。命中这些词时,允许按绝对值绑定。
- * ⚠️ 仅放宽**符号**,不放宽数值本身;方向词写反(该"降"写成"升")这里抓不到 —— 那是语义层的事。
+ * ⚠️ 仅放宽**符号**,不放宽数值本身。正向词(上升 / 增加…)不放宽,见 `signedBefore`;
+ *    负向词写反(该"升"写成"降",配正值证据)这里仍抓不到 —— 正值本来就能直接绑上。
  */
 export const SIGNED_BEFORE = /(下降|上升|下跌|上涨|回落|回升|减少|增加|降低|提高|收窄|扩大|低|高|多|少|降|升|增|减|差)\s*$/;
+/**
+ * 正向方向词:后面的数本该是正值。「同比上升 1.92%」配证据 -1.92% 是方向写反,不能借上面的放宽绑上去(审计 2026-10-11 Codex 范围 4 第 4 条)。
+ * 例外:前面有把方向反过来的名词 ——「亏损增加 2 亿」「跌幅扩大」配负值证据是对的,照旧放宽。
+ * 「收窄 / 扩大 / 差」本身方向不定,不在这里。
+ */
+const UP_BEFORE = /(上升|上涨|回升|增加|提高|高|多|升|增)\s*$/;
+const INVERTED_BEFORE = /(亏|跌|降幅|负|缺口|逆差|赤字)/;
+/** 方向词允许按绝对值绑负值证据吗 */
+export const signedBefore = (before: string): boolean => SIGNED_BEFORE.test(before) && !(UP_BEFORE.test(before) && !INVERTED_BEFORE.test(before));
 
 export function reportSections(report: string): Record<string, string[]> {
   const out: Record<string, string[]> = {}; let cur = "_head";
@@ -431,6 +456,17 @@ export interface FidelityResult {
   /** 给补跑 Agent 的结构化定位信息；字符串 violations 保留给既有调用方与日志。 */
   violationDetails: FidelityViolationDetail[];
   evidenceViolationDetails: FidelityViolationDetail[];
+  /** 同行没引任何 id、本次证据 / 计算 / 档案里也找不到的数字:交付前遮掉,报告标「不完整」 */
+  uncited: UncitedNumber[];
+}
+
+export interface UncitedNumber {
+  section: string;
+  /** 所在行(原文),遮挡时按整行定位 */
+  line: string;
+  /** 数字本身(不含单位)在行内的位置和写法 */
+  index: number;
+  num: string;
 }
 
 export interface FidelityViolationDetail {
@@ -441,6 +477,12 @@ export interface FidelityViolationDetail {
   /** 本次运行里值正好等于这个数、同行却没引的证据或计算（最多 3 条）：补上或换成它 */
   foundIn?: string[];
 }
+
+/** 明确写成假设 / 情景的行:数字是设定,不是事实 */
+const ASSUMPTION_LINE = /假设|假定|情景|设定|如果|倘若|若按|若以/;
+
+/** 遮挡未核实数字时的占位 */
+export const UNVERIFIED_MARK = "〔未核实〕";
 
 /** 像代码（6 位 / 0 开头 5 位）或紧凑日期（20260903）的整数：是编号不是数据 */
 const CODE_OR_DATE = /^-?(?:\d{6}|0\d{4}|(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))\.?$/;
@@ -477,7 +519,8 @@ export function summarizeFidelityViolations(items: FidelityViolationDetail[], ma
 export function checkNumberFidelity(report: string, evById: Map<string, EvidenceItem>,
                                     calcById: Map<string, CalcRecord>, symbol?: string,
                                     quoted: string[] = [], lex: Lexicon = currentLexicon(),
-                                    excludedSections: readonly string[] = []): FidelityResult {
+                                    excludedSections: readonly string[] = [],
+                                    library?: { ids: ReadonlySet<string>; text: string }): FidelityResult {
   // `quoted` = 可**逐字引用**的历史文本(知识档案召回内容、knowledge_conflicts 的 claim)。
   // 报告写"旧前瞻 CAGR 59.09% 不再适用,本次为 58.85%"时,59.09% 是对档案的**引用**,
   // 本次运行的证据里当然没有它 —— 不把这类纳入可绑定池,就会把"如实标注新旧差异"这个**正确行为**判成违规。
@@ -488,6 +531,13 @@ export function checkNumberFidelity(report: string, evById: Map<string, Evidence
   const evidenceViolations: string[] = []; // 纯 evidence 行 —— **与 display 无关,始终上报**
   const violationDetails: FidelityViolationDetail[] = [];
   const evidenceViolationDetails: FidelityViolationDetail[] = [];
+  const uncited: UncitedNumber[] = [];
+  // 没引 id 的行:本次任一证据(按写的量级换算、或文本里逐字出现)、任一计算的 display / 输入 / 中间量,都算有出处
+  const allEvIds = [...evById.keys()];
+  const allEvTexts = numbersOf(allEvIds, evById, calcById).texts;
+  const allEvScaled = scaledEvidenceOf(allEvIds, evById);
+  // 计算的输入 / 中间量没有单位:按「元级 / 比值」处理(写了 % 的允许 ×100,写了万 / 亿的按元换算)
+  const calcInputsAll = intermediateNumbersOf([...calcById.keys()], calcById).map((v) => ({ v, scale: null as EvidenceScale }));
   // 本次运行里已有的数:证据里的数值、各 calc 成功结果的 display。档案引用的豁免只给**本次没有**的旧值 ——
   // 本次证据 / 计算里就有的数,同行必须引它的编号。ht-global3 真踩:一组本次证据里就有的数早写进了上次的档案,
   // 表格那行只引了另一个计算编号,这两个数靠档案放行,读者在这一行点不到出处;档案里的旧数也可能被当作这次的数写进来。
@@ -495,14 +545,20 @@ export function checkNumberFidelity(report: string, evById: Map<string, Evidence
   for (const [id, e] of evById) if (typeof e.value === "number" && Number.isFinite(e.value)) currentEv.set(e.value, [...(currentEv.get(e.value) ?? []), id]);
   const currentDisp: [string, string][] = [];
   for (const [id, c] of calcById) for (const r of resultProjection(c.output)) if (r.display && r.status === "ok") currentDisp.push([normDisp(r.display), id]);
-  const inRunIds = (raw: string, val: number): string[] => {
+  const dispIds = (raw: string): string[] => {
     const n = normDisp(raw);
-    const ids = [...(currentEv.get(val) ?? []), ...currentDisp.filter(([d]) => d === n || (d.startsWith(n) && !/^[\d.]/.test(d.slice(n.length)))).map(([, id]) => id)];
-    return [...new Set(ids)];
+    return currentDisp.filter(([d]) => d === n || (d.startsWith(n) && !/^[\d.]/.test(d.slice(n.length)))).map(([, id]) => id);
   };
+  const inRunIds = (raw: string, val: number): string[] => [...new Set([...(currentEv.get(val) ?? []), ...dispIds(raw)])];
   for (const [sec, lines] of Object.entries(secs)) {
-    if (sec === "_head" || excludedSections.includes(sec)) continue;
+    // 标题带序号或后缀(「七、数据缺口」「数据缺口与局限」)也算:和必需章节检查同一口径(v2.2.0 审计 Opus 第 3 条)
+    if (sec === "_head" || excludedSections.some((x) => sec.includes(x))) continue;
+    let assumedTable = false;
     for (const line of lines) {
+      // 表头写了「情景 / 假设」的表格,下面的数据行(「| 乐观 | 35.2 倍 |」)也是设定;遇到非表格行就结束
+      if (!/^\s*\|/.test(line)) assumedTable = false;
+      else if (/^\s*\|[\s:|-]*$/.test(line)) { /* 分隔行 */ }
+      else if (!assumedTable && ASSUMPTION_LINE.test(line)) assumedTable = true;
       const ids = [...line.matchAll(/(?<![0-9a-zA-Z_-])(ev-[0-9a-f]{6,}|calc-[0-9a-f]{16})(?![0-9a-zA-Z_])/g)].map((m) => m[1]);
       const calcIds = ids.filter((id) => calcById.has(id));
       const evIds = ids.filter((id) => evById.has(id));
@@ -512,7 +568,42 @@ export function checkNumberFidelity(report: string, evById: Map<string, Evidence
       //    806 个需校验 token,报出 5 个,逐个核对后 **4 个是真缺陷**
       //    (某次运行的事实表把证据 id 整体错位了一行:70.96 那行引的 id 实际值是 39.03),
       //    1 个是空格造成的误报(已在下面的文本匹配里规范化空白)(Codex fidelity-r1 P1)。
-      if (!calcIds.length && !evIds.length) continue;
+      if (!calcIds.length && !evIds.length) {
+        // 🔴 没引 id 的行原来整行跳过 —— 编造的数字只要不写 id 就不被核对(审计 2026-10-09 第 2 轮 A5)。
+        //    现在:本次证据 / 计算 / 档案里找得到这个值的放过(有出处、只是没标),找不到的记下来,交付前遮掉
+        if (ASSUMPTION_LINE.test(line) || assumedTable) continue;
+        const libCited = !!library && [...line.matchAll(/\[资料:([0-9a-f]{32}) p\.(?:\d+|-)\]/g)].some((m) => library.ids.has(m[1]!));
+        for (const tok of claimTokens(line, symbol, lex)) {
+          // 「31.2%-35.8%」「1,200-1,500 亿元」:连字符前紧挨着数 / % / 单位,是区间号,后一个数按正数核对(v2.2.0 审计 Opus 第 2 条)
+          const rangeAt = (i: number) => /[\d%亿万元倍xX]\s*-\s*$/.test(line.slice(0, i));
+          const t = tok.raw.startsWith("-") && rangeAt(tok.index + 1) ? { n: -tok.n, raw: tok.raw.slice(1), index: tok.index + 1 } : tok;
+          const unit = /[^0-9.,e+-]+$/.exec(t.raw)?.[0] ?? "";
+          const num = t.raw.slice(0, t.raw.length - unit.length);
+          const decimal = /\.\d/.test(num);
+          if (!decimal && !unit && (Math.abs(t.n) < 1e4 || CODE_OR_DATE.test(num))) continue;
+          const before = line.slice(Math.max(0, t.index - 6), t.index);
+          if (!decimal && PROSE_BEFORE.test(before)) continue;
+          const signed = signedBefore(before);
+          const neg = negatedAt(line, t.index) && !rangeAt(t.index);
+          const val = neg ? -t.n : t.n;
+          const raw = neg ? `-${t.raw}` : t.raw;
+          // 明写了「元 / 股」的按倍率 1 去和证据单位换算(证据 1.2345 万元、报告 12345 元也对得上);没写单位的才只比原值
+          const written = writtenScale(line, t.index + num.length) ?? (/^\s*(?:元|股)/.test(line.slice(t.index + num.length)) ? 1 : null);
+          const places = /\.(\d+)/.exec(num)?.[1].length ?? 0;
+          // 🔴 证据只按 writtenExact 对(带单位换算):不能拿「数值和某条证据相等」直接放行 ——
+          //    证据 37.42 亿元、报告写 37.42 万元,数值相等、差一万倍(v2.2.0 审计 Codex 第 2 条)
+          const known = (x: number, r: string) => dispIds(r).length > 0
+            || writtenExact(x, places, written, allEvScaled)
+            || allEvTexts.some((tx) => quotedIncludes(normDisp(tx), normDisp(r)))
+            || writtenExact(x, places, written, calcInputsAll)
+            || (!!quotedText && (quotedIncludes(quotedText, r) || quotedIncludes(quotedText, String(x))))
+            // 同行引了本次注入的用户资料:资料片段原文里有这个数就算有出处
+            || (libCited && (quotedIncludes(library!.text, r) || quotedIncludes(library!.text, String(x))));
+          if (known(val, raw) || (signed && known(-t.n, `-${t.raw}`))) continue;
+          uncited.push({ section: sec, line, index: t.index, num: line.slice(t.index, t.index + num.length) });
+        }
+        continue;
+      }
       const displays = new Set<string>();
       for (const id of calcIds) {
         const rec = calcById.get(id)!;
@@ -564,7 +655,7 @@ export function checkNumberFidelity(report: string, evById: Map<string, Evidence
         const before = idx >= 0 ? line.slice(Math.max(0, idx - 6), idx) : "";
         if (!decimal && PROSE_BEFORE.test(before)) continue;               // "近 5 年" / "连续 3 期":叙述,豁免
         total++;
-        const signed = SIGNED_BEFORE.test(before);        // "下降 1.92" ← 证据 / display 为 -1.92
+        const signed = signedBefore(before);              // "下降 1.92" ← 证据 / display 为 -1.92
         // 行内**显式写了负号**时,要拿负值去绑:否则 "−1.92%" 会被当成 1.92 绑上一个正值证据
         const neg = negatedAt(line, idx);
         const val = neg ? -t.n : t.n;
@@ -611,7 +702,39 @@ export function checkNumberFidelity(report: string, evById: Map<string, Evidence
   //    ② calc 版本本该写 display 却没写 → 那是 calc 侧的缺陷,
   //       此时静默跳过等于把整条数字忠实度防线关掉,而外面看不出来。⇒ 用 `missingDisplay` 报出来。
   return { applicable: anyDisplay, total, exact, violations, evidenceViolations, violationDetails,
-    evidenceViolationDetails, missingDisplay: shouldHaveDisplay > 0 };
+    evidenceViolationDetails, missingDisplay: shouldHaveDisplay > 0, uncited };
+}
+
+
+/**
+ * 把没有出处的数字换成占位(只换数字本身,单位和上下文留着),开头加一句说明。
+ * 同一行原文出现几次就换几次;位置对不上的(行已被改过)不换。返回遮了几处。
+ */
+export function maskUncited(report: string, uncited: readonly UncitedNumber[]): { text: string; count: number } {
+  if (!uncited.length) return { text: report, count: 0 };
+  // 按「章节 + 行」定位:别处(比如数据缺口)一字不差的同一行不跟着遮
+  const key = (sec: string, line: string) => `${sec}\u0000${line}`;
+  const byLine = new Map<string, Map<number, string>>();
+  for (const u of uncited) { const k = key(u.section, u.line); (byLine.get(k) ?? byLine.set(k, new Map()).get(k)!).set(u.index, u.num); }
+  let count = 0;
+  let sec = "_head";
+  const lines = report.split("\n").map((line) => {
+    const h = /^##\s+(.+)$/.exec(line);
+    if (h) { sec = h[1]!.trim(); return line; }
+    const at = byLine.get(key(sec, line));
+    if (!at) return line;
+    let out = line;
+    for (const [index, num] of [...at].sort((a, b) => b[0] - a[0])) {
+      if (out.slice(index, index + num.length) !== num) continue;
+      out = out.slice(0, index) + UNVERIFIED_MARK + out.slice(index + num.length);
+      count++;
+    }
+    return out;
+  });
+  if (!count) return { text: report, count: 0 };
+  // 放在首行(标题 + 状态)之后:读者先看到,也不进任何章节
+  const note = `> 有 ${count} 处数字在本次取到的数据和计算里找不到出处，已替换为${UNVERIFIED_MARK}，本报告因此标为不完整。`;
+  return { text: [lines[0], "", note, ...lines.slice(1)].join("\n"), count };
 }
 
 
