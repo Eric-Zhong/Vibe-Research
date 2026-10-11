@@ -568,11 +568,13 @@ npm run build --prefix desktop
 .venv/bin/python -m pytest .agents/skills/data-access/scripts/tests -q
 ```
 
-最近本机验收记录（2026-10-10，v2.1.0 发布前）：
+最近本机验收记录（2026-10-11，v2.2.0 发布前）：
 
-- orchestrator：Node 26 运行 `npm test`，**1225 项：1224 通过、1 项 Windows ACL 专项跳过**；类型检查通过。
-- desktop：**346/346**，类型检查与生产构建通过（构建只有 Vite 的打包体积提示）；Python（计算库 311、回测 571、数据脚本 566）：**1448/1448**；mypy 检查 106 个文件通过。
-- 回测页用 Claude Code 订阅真跑过一次（茅台 + 宁德时代等权组合，2019–2025 均线交叉，对沪深300），4 张图亮暗主题都核对过，图里的数与报告一致。
+- orchestrator：Node 26 运行 `npm test`，**1264 项：1260 通过、4 项 Windows 专项跳过**；类型检查通过。
+- desktop：**351/351**，类型检查与生产构建通过（构建只有 Vite 的打包体积提示）；Python（计算库 311、回测 583、数据脚本 580）：**1474/1474**；mypy 检查 106 个文件通过。
+- 报告数字核对：拿本机 9 份历史报告重跑，一处都没遮；随机造的数字被误认成有出处 12/2700（0.44%）。
+- 发版前两轮独立只读审计（Codex 6.1 Sol、Opus 5.5），去重后 11 条真问题全部修复，每条都做了反向检查（把修复改回去，测试必须变红）。
+- 回测页上一版（v2.1.0）用 Claude Code 订阅真跑过一次（茅台 + 宁德时代等权组合，2019–2025 均线交叉，对沪深300）；本版改了期末结算，靠测试覆盖，没有再真跑。
 - 三家订阅的研究运行范围见 [CHANGELOG](CHANGELOG.md) v2.0.0 条目；本轮未重跑全部外部取数端点或 Windows 实机。
 - 历史业务验证保留在 [M40 验收](docs/发布候选与隐私验收_M40_2026-09-07.md)，不当作本版全业务验收。
 
@@ -588,7 +590,7 @@ npm run build --prefix desktop
 
 对照基线为 [v1.2.0 发布说明](https://github.com/simonlin1212/Vibe-Research/releases/tag/v1.2.0)。完整变化见 [CHANGELOG](CHANGELOG.md)。
 
-| 方面 | v1.2.0 | v2.1.0 |
+| 方面 | v1.2.0 | v2.2.0 |
 |---|---|---|
 | AI 底座 | 内置 Codex Harness（Codex SDK 0.153.4） | 不再内置；三家订阅直接调用使用者本机的官方 CLI，模型 API 直接走 Chat Completions |
 | Codex 订阅 | 产品专用登录（`.local/codex-home`） | 使用者自己 `codex login`（ChatGPT 账号）的 Codex CLI，与 Claude Code、WorkBuddy 同级 |

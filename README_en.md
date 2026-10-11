@@ -571,11 +571,13 @@ npm run build --prefix desktop
 .venv/bin/python -m pytest .agents/skills/data-access/scripts/tests -q
 ```
 
-Latest local acceptance checks (October 10, 2026, before the v2.1.0 release):
+Latest local acceptance checks (October 11, 2026, before the v2.2.0 release):
 
-- orchestrator: `npm test` on Node 26 reported **1225 tests: 1224 passed, one Windows-only ACL test skipped**; typecheck passed.
-- desktop: **346/346**, with typecheck and production build passing (the build prints only Vite's chunk-size notice); Python (calculation library 311, backtest 571, data scripts 566): **1448/1448**; mypy passed on 106 files.
-- The backtest page was run once for real with a Claude Code subscription (an equal-weight Kweichow Moutai + CATL portfolio, 2019–2025 moving-average crossover, vs. the CSI 300); all four charts were checked in light and dark themes and match the report.
+- orchestrator: `npm test` on Node 26 reported **1264 tests: 1260 passed, four Windows-only tests skipped**; typecheck passed.
+- desktop: **351/351**, with typecheck and production build passing (the build prints only Vite's chunk-size notice); Python (calculation library 311, backtest 583, data scripts 580): **1474/1474**; mypy passed on 106 files.
+- Report number check: rerun against nine local historical reports, nothing was masked; randomly made-up numbers were wrongly accepted as sourced 12 times out of 2,700 (0.44%).
+- Two independent read-only code audits before release (Codex 6.1 Sol and Opus 5.5): 11 real issues after de-duplication, all fixed, each with a reverse check (undo the fix and the test must fail).
+- The backtest page was run once for real with a Claude Code subscription in the previous release (v2.1.0: an equal-weight Kweichow Moutai + CATL portfolio, 2019–2025 moving-average crossover, vs. the CSI 300). This release changes end-of-backtest settlement; that is covered by tests and was not rerun live.
 - Live research runs with the three subscriptions are listed in the v2.0.0 entry of the [CHANGELOG](CHANGELOG.md). This round did not rerun every external data endpoint or physical Windows hardware.
 - Historical business validation remains in [M40 acceptance](docs/发布候选与隐私验收_M40_2026-09-07.md) (Chinese), not as full business acceptance of this revision.
 
@@ -592,7 +594,7 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 The baseline is the [v1.2.0 release](https://github.com/simonlin1212/Vibe-Research/releases/tag/v1.2.0). All changes are listed in the [CHANGELOG](CHANGELOG.md).
 
-| Area | v1.2.0 | v2.1.0 |
+| Area | v1.2.0 | v2.2.0 |
 |---|---|---|
 | AI foundation | Bundled Codex Harness (Codex SDK 0.153.4) | No longer bundled; the three subscriptions call the official CLIs on the user's machine, and model APIs go straight to Chat Completions |
 | Codex subscription | Product-specific login (`.local/codex-home`) | The user's own Codex CLI signed in with `codex login` (ChatGPT account), on equal footing with Claude Code and WorkBuddy |
