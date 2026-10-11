@@ -170,7 +170,9 @@ def _result_view(r: Result, charts: bool = False, sensitivity: dict | None = Non
             "annual_volatility", "longest_drawdown_bars", "exposure_time", "avg_gross_exposure",
             "best_day", "worst_day", "best_month", "worst_month", "positive_month_ratio",
             "best_year", "worst_year", "skew", "kurtosis", "var_95", "cvar_95", "ulcer_index",
-            "expectancy", "expectancy_pct", "largest_win", "largest_loss", "sqn", "fees_pct_of_initial")
+            "expectancy", "expectancy_pct", "largest_win", "largest_loss", "sqn", "fees_pct_of_initial",
+            # 期末卖不出去的持仓完整清单(披露里超过 5 只只列前 5 只)
+            "unsettled_positions")
     benchmark_is_self = "benchmark_ticker" not in m
     disclosures = [price_basis(r.plan.market.key),
                    "费率为固定假设，未建模历史费率调整及不同券商差异。",

@@ -117,6 +117,40 @@ export function scaledEvidenceOf(ids: string[], evById: Map<string, EvidenceItem
   }
   return out;
 }
+/**
+ * 一段原文(用户资料片段、档案引文)里的数,连同紧跟着写的单位:「120.5 亿元」= 120.5 × 亿;
+ * 没写单位的按「单位不明」。给没引编号的行用 writtenExact 对 —— 不能拿裸数字比:
+ * 资料写 120.5 亿元、报告写 120.5 万元,裸数字相等、差一万倍(v2.1.0 合并审计 Codex 第 1 条)
+ * 量级词直接给倍数:evidenceScale 按开头字判断,「百万港元」会被当成 1 倍
+ */
+const TEXT_SCALE: Record<string, number> = { 万亿: 1e12, 千亿: 1e11, 百亿: 1e10, 亿: 1e8, 千万: 1e7, 百万: 1e6, 万: 1e4, 千: 1e3, billion: 1e9, bn: 1e9, million: 1e6, mn: 1e6 };
+function scaledNumbersInText(text: string): { v: number; scale: EvidenceScale }[] {
+  const out: { v: number; scale: EvidenceScale }[] = [];
+  const t = text.replace(/[\u2212\uFF0D]/g, "-");
+  const re = /(?<![\d.])(\d{1,3}(?:,\d{3})+(?![\d,])(?:\.\d+)?|\d+(?:\.\d+)?)\s*(个百分点|百分点|%|％|万亿|千亿|百亿|千万|百万|亿|万|千(?=[美港]?元)|(?:billion|bn|million|mn)\b)?\s*(元|美元|港元|股|倍)?/gi;
+  for (const m of t.matchAll(re)) {
+    const n = Number(m[1]!.replace(/,/g, ""));
+    if (!Number.isFinite(n)) continue;
+    const mag = m[2]?.toLowerCase();
+    const scale: EvidenceScale = !mag ? (m[3] ? 1 : null) : /百分点|%|％/.test(mag) ? "pct" : TEXT_SCALE[mag] ?? null;
+    out.push({ v: textNegated(t, m.index!) ? -n : n, scale });
+  }
+  return out;
+}
+/**
+ * 原文里数前面的「-」是不是负号。紧挨在数 / % / 单位后面的(「31.2%-35.8%」「1,200亿-1,500亿」)、
+ * 两边都有空格的(「31.3 - 35.8」)是区间号;「15.2% -3.4%」是表格压平后的两个数,后一个是负数;
+ * 行首「- 」是列表标记(v2.1.0 合并审计复核第 2 条)
+ */
+function textNegated(t: string, idx: number): boolean {
+  const head = t.slice(t.lastIndexOf("\n", idx - 1) + 1, idx);
+  const m = /(\S?)([ \t]*)-([ \t]*)$/.exec(head);
+  if (!m) return false;
+  const [, prev, spaceBefore, spaceAfter] = m;
+  if (!prev) return !spaceAfter;
+  if (/[\d%％亿万元倍股]/.test(prev!)) return !!spaceBefore && !spaceAfter;
+  return true;
+}
 /** 写了量级的数字按写的量级去对证据;容差与 numberBound 相同 */
 export function unitBound(token: number, written: WrittenScale, pool: { v: number; scale: EvidenceScale }[], relTol = 2e-3): boolean {
   const tol = Math.max(Math.abs(token) * relTol, relTol * 2.5);
@@ -538,6 +572,9 @@ export function checkNumberFidelity(report: string, evById: Map<string, Evidence
   const allEvScaled = scaledEvidenceOf(allEvIds, evById);
   // 计算的输入 / 中间量没有单位:按「元级 / 比值」处理(写了 % 的允许 ×100,写了万 / 亿的按元换算)
   const calcInputsAll = intermediateNumbersOf([...calcById.keys()], calcById).map((v) => ({ v, scale: null as EvidenceScale }));
+  // 档案引文、本次用户资料片段里的数,连同写在后面的单位
+  const quotedScaled = scaledNumbersInText(quotedText);
+  const libraryScaled = library ? scaledNumbersInText(library.text) : [];
   // 本次运行里已有的数:证据里的数值、各 calc 成功结果的 display。档案引用的豁免只给**本次没有**的旧值 ——
   // 本次证据 / 计算里就有的数,同行必须引它的编号。ht-global3 真踩:一组本次证据里就有的数早写进了上次的档案,
   // 表格那行只引了另一个计算编号,这两个数靠档案放行,读者在这一行点不到出处;档案里的旧数也可能被当作这次的数写进来。
@@ -575,20 +612,24 @@ export function checkNumberFidelity(report: string, evById: Map<string, Evidence
         const libCited = !!library && [...line.matchAll(/\[资料:([0-9a-f]{32}) p\.(?:\d+|-)\]/g)].some((m) => library.ids.has(m[1]!));
         for (const tok of claimTokens(line, symbol, lex)) {
           // 「31.2%-35.8%」「1,200-1,500 亿元」:连字符前紧挨着数 / % / 单位,是区间号,后一个数按正数核对(v2.2.0 审计 Opus 第 2 条)
-          const rangeAt = (i: number) => /[\d%亿万元倍xX]\s*-\s*$/.test(line.slice(0, i));
+          const rangeAt = (i: number) => /[\d%亿万元倍xX]\s*[-－]\s*$/.test(line.slice(0, i));
           const t = tok.raw.startsWith("-") && rangeAt(tok.index + 1) ? { n: -tok.n, raw: tok.raw.slice(1), index: tok.index + 1 } : tok;
           const unit = /[^0-9.,e+-]+$/.exec(t.raw)?.[0] ?? "";
           const num = t.raw.slice(0, t.raw.length - unit.length);
           const decimal = /\.\d/.test(num);
-          if (!decimal && !unit && (Math.abs(t.n) < 1e4 || CODE_OR_DATE.test(num))) continue;
+          // 明写了「元 / 股」的按倍率 1 去和证据单位换算(证据 1.2345 万元、报告 12345 元也对得上);没写单位的才只比原值。
+          // 区间「31.2-35.8 亿元」「99~150 亿元」「31.3 至 35.8 亿元」左端没写单位,用右端写的(v2.1.0 合并审计 Codex 第 2 条、复核第 3、4 条)
+          const rangeTail = /^\s*(?:-|－|~|～|〜|–|—|至|到)\s*\d[\d,]*(?:\.\d+)?/.exec(line.slice(t.index + num.length));
+          const unitAt = t.index + num.length + (rangeTail?.[0].length ?? 0);
+          const written = writtenScale(line, unitAt) ?? (/^\s*(?:元|股)/.test(line.slice(unitAt)) ? 1 : null);
+          // 整数、没写单位的按计数跳过;区间左端借到了右端的单位就不是计数(「99-150 亿元」的 99 要查)
+          if (!decimal && !unit && written === null && (Math.abs(t.n) < 1e4 || CODE_OR_DATE.test(num))) continue;
           const before = line.slice(Math.max(0, t.index - 6), t.index);
           if (!decimal && PROSE_BEFORE.test(before)) continue;
           const signed = signedBefore(before);
           const neg = negatedAt(line, t.index) && !rangeAt(t.index);
           const val = neg ? -t.n : t.n;
           const raw = neg ? `-${t.raw}` : t.raw;
-          // 明写了「元 / 股」的按倍率 1 去和证据单位换算(证据 1.2345 万元、报告 12345 元也对得上);没写单位的才只比原值
-          const written = writtenScale(line, t.index + num.length) ?? (/^\s*(?:元|股)/.test(line.slice(t.index + num.length)) ? 1 : null);
           const places = /\.(\d+)/.exec(num)?.[1].length ?? 0;
           // 🔴 证据只按 writtenExact 对(带单位换算):不能拿「数值和某条证据相等」直接放行 ——
           //    证据 37.42 亿元、报告写 37.42 万元,数值相等、差一万倍(v2.2.0 审计 Codex 第 2 条)
@@ -596,9 +637,9 @@ export function checkNumberFidelity(report: string, evById: Map<string, Evidence
             || writtenExact(x, places, written, allEvScaled)
             || allEvTexts.some((tx) => quotedIncludes(normDisp(tx), normDisp(r)))
             || writtenExact(x, places, written, calcInputsAll)
-            || (!!quotedText && (quotedIncludes(quotedText, r) || quotedIncludes(quotedText, String(x))))
-            // 同行引了本次注入的用户资料:资料片段原文里有这个数就算有出处
-            || (libCited && (quotedIncludes(library!.text, r) || quotedIncludes(library!.text, String(x))));
+            // 档案引文 / 同行引了的本次用户资料:片段里有这个数、按写的位数和单位对得上才算有出处
+            || writtenExact(x, places, written, quotedScaled)
+            || (libCited && writtenExact(x, places, written, libraryScaled));
           if (known(val, raw) || (signed && known(-t.n, `-${t.raw}`))) continue;
           uncited.push({ section: sec, line, index: t.index, num: line.slice(t.index, t.index + num.length) });
         }
@@ -676,8 +717,12 @@ export function checkNumberFidelity(report: string, evById: Map<string, Evidence
         // ⚠️ 引用历史负值时也要走方向词那条路:档案是 "-1.92%"、报告写"下降 1.92%",
         //    加了符号边界后若不给这条路径补 `-token`,正当写法反而被拦(这是 r3 修复引入的,r4 抓到)。
         const inRun = [...inRunIds(raw, val), ...(signed ? inRunIds(`-${t.raw}`, -t.n) : [])].filter((id) => !ids.includes(id));
-        if (!inRun.length && quotedText && (quotedIncludes(quotedText, raw) || quotedIncludes(quotedText, String(val))
-            || (signed && (quotedIncludes(quotedText, `-${t.raw}`) || quotedIncludes(quotedText, String(-t.n)))))) { exact++; continue; }
+        // 写了万 / 亿 / % 的按写的位数和单位对档案(档案 120.5 亿元、报告 120.5 万元不算引用);没写量级的照旧允许截位(复核第 6 条)
+        const places = /\.(\d+)/.exec(num)?.[1].length ?? 0;
+        const fromArchive = (x: number, r: string) => written === null
+          ? quotedIncludes(quotedText, r) || quotedIncludes(quotedText, String(x))
+          : writtenExact(x, places, written, quotedScaled);
+        if (!inRun.length && quotedText && (fromArchive(val, raw) || (signed && fromArchive(-t.n, `-${t.raw}`)))) { exact++; continue; }
         // PR #42: 输入和 details 中间量可舍入、换算单位；不纳入 output.value。
         // 小数用紧容差，不能把 27.30 改写为 27.35；主结果仍必须照抄 display。
         // 年/期不走此豁免，避免把倍数锚误绑成年数。

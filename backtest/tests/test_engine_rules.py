@@ -496,7 +496,10 @@ def test_unsettled_disclosure_is_one_bounded_line():
         **{f"60000{i}.SH": "最后一天才买入，按 T+1 当天不能卖" for i in range(8)},
         **{f"00000{i}.SZ": "最后一天没有行情（停牌或数据源缺行）" for i in range(1, 4)},
     }
-    disclosures = _view(met)["required_disclosures"]
+    view = _view(met)
+    # 披露只列前 5 只，完整清单原样在 metrics 里（v2.1.0 合并审计 Codex 第 3 条）
+    assert view["metrics"]["unsettled_positions"] == met["unsettled_positions"]
+    disclosures = view["required_disclosures"]
     lines = [d for d in disclosures if d.startswith("回测最后一天有")]
     assert len(lines) == 1 and len(lines[0]) <= 500, lines
     assert "11 只持仓" in lines[0] and "等 8 只" in lines[0] and "000003.SZ" in lines[0]
