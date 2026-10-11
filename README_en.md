@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-yellow"></a>
-  <a href="CHANGELOG.md"><img alt="Source v2.1.0" src="https://img.shields.io/badge/source-v2.1.0-F35D2B"></a>
+  <a href="CHANGELOG.md"><img alt="Source v2.1.1" src="https://img.shields.io/badge/source-v2.1.1-F35D2B"></a>
   <img alt="Markets: CN, US, HK" src="https://img.shields.io/badge/markets-CN%20%7C%20US%20%7C%20HK-0b7285">
   <img alt="168 data endpoints" src="https://img.shields.io/badge/data-168%20endpoints-2f9e44">
   <img alt="AI: Claude Code, Codex, WorkBuddy, or a model API" src="https://img.shields.io/badge/AI-Claude%20Code%20%7C%20Codex%20%7C%20WorkBuddy%20%7C%20API-black">
@@ -273,7 +273,7 @@ See [datasources/CATALOG.md](datasources/CATALOG.md) for the endpoint catalog.
 
 - **Codex**: run `npm install -g @openai/codex`, then `codex login` in a terminal to sign in with your ChatGPT account. Return to **Connect AI**, click **Recheck**, and click **Test and save** once it shows as available. A Codex CLI signed in with an API key is not accepted, so a subscription cannot silently turn into pay-as-you-go billing.
 - **Claude Code**: once signed in with a claude.ai subscription, Settings detects it automatically. API-key, Bedrock, and Vertex logins do not count as a subscription.
-- **WorkBuddy / CodeBuddy**: an installed, signed-in WorkBuddy desktop app is detected directly, with no second installation or login. Without the desktop app, run `npm install -g @tencent-ai/codebuddy-code`, then run `codebuddy` once to sign in. If automatic detection cannot find WorkBuddy (the card shows "not installed"), enter its location on the WorkBuddy card, or set `CODEBUDDY_BIN` before starting.
+- **WorkBuddy / CodeBuddy**: an installed, signed-in WorkBuddy desktop app is detected directly, with no second installation or login. On Windows, an install on another drive or in a custom folder is also found through the installed-programs registry or a running WorkBuddy. Without the desktop app, run `npm install -g @tencent-ai/codebuddy-code`, then run `codebuddy` once to sign in. If WorkBuddy still is not found (the card shows "not installed"), open WorkBuddy and click **Recheck**, or enter its installation folder on the WorkBuddy card, or set `CODEBUDDY_BIN` before starting.
 - **Model API**: open **Connect AI → API access**, choose a provider, enter the API base URL, model name, and key, then click **Test and save**.
 
 If the local status is unclear, run `scripts/doctor` (or `scripts\doctor.ps1` on Windows) for an actionable diagnosis.
@@ -339,6 +339,9 @@ scripts/start
 
 - Setup (`scripts/setup` or `scripts\setup-windows.cmd`) creates `.venv`, installs Node / Python dependencies, initializes the private data directory, and runs diagnostics.
 - Start (`scripts/start` or `scripts\start.cmd`) checks the installation and ports, starts the local API and the UI together, and opens [http://127.0.0.1:5930](http://127.0.0.1:5930) once both are healthy. No second terminal is needed; Ctrl+C stops both.
+- Ports: the UI defaults to 5930 and the local API to 8765. If a default port is taken by another program or reserved by the system (on Windows, Hyper-V / WSL often reserve whole port ranges), start switches to a free port, says so in the terminal, and opens the actual address. If a Vibe Research is already running, it tells you to open that one instead.
+  - After a switch, the model API settings and chat history under **Connect AI** need to be set up again at the new address: they live in the browser and are kept per address. The same port conflict always leads to the same replacement port, and once the default port is free again, a restart brings back the original address and settings.
+  - To pin the ports: `scripts/start --port 6930 --api-port 9765` (Windows: `scripts\start.cmd -Port 6930 -ApiPort 9765`), or set `VRA_UI_PORT` / `VRA_API_PORT`. A port you choose yourself is never swapped: if it is unavailable, start stops with an error.
 - On macOS / Linux, use `scripts/start --no-open` to skip opening the browser automatically.
 - Vite proxies `/api/*` locally and adds authentication on the server side. If `VRA_DATA_ROOT` is set, both processes must use the same value.
 
@@ -354,7 +357,7 @@ If you'd rather not install Node, Python, and Git, download the package for your
 | Apple silicon Mac | macOS 14 or later | `VibeResearch-<version>-mac-arm64.zip` |
 | Intel Mac | macOS 14 or later | `VibeResearch-<version>-mac-x64.zip` |
 
-1. Unzip it anywhere and double-click `Start-VibeResearch.cmd` (Windows) or `Start-VibeResearch.command` (macOS). A console / Terminal window opens and your browser goes to [http://127.0.0.1:5930](http://127.0.0.1:5930); close that window to quit.
+1. Unzip it anywhere and double-click `Start-VibeResearch.cmd` (Windows) or `Start-VibeResearch.command` (macOS). A console / Terminal window opens and your browser goes to [http://127.0.0.1:5930](http://127.0.0.1:5930) (if 5930 is taken, another port is used; go by the address shown in the window); close that window to quit.
 2. The packages are not code-signed, so the first launch is blocked: on Windows, when SmartScreen says "Windows protected your PC", click "More info" → "Run anyway"; on macOS, if the developer cannot be verified, run `xattr -dr com.apple.quarantine <unzipped folder>` in Terminal and double-click again.
 3. Transactions, research records, and settings are kept in the folder's `.local` (Finder hides folders whose names start with a dot; press Command+Shift+. to show them). To upgrade, unzip the new version into a new folder, copy the old folder's `.local` into it, and start from the new folder; delete the old folder once everything looks right.
 4. AI setup is the same as the source install: reuse the Claude Code / Codex / WorkBuddy already signed in on your computer, or enter a model API under "接入 AI" (Connect AI).
@@ -367,7 +370,7 @@ On a macOS / Linux cloud computer:
 
 ```bash
 scripts/setup
-scripts/start --remote --no-open --public-url https://<public address the platform assigns to port 5930>
+scripts/start --remote --no-open --public-url https://<public address the platform assigns to the UI port (default 5930)>
 ```
 
 Once started, the terminal prints a link carrying an access token (`https://…/?access=…`); open it in a browser to use the workbench. For the next 30 days, opening the public address directly is enough. No SSH is needed, and nothing connects back to your own computer. For running in the background, rotating the token, and other details, see [AGENTS.md](AGENTS.md) §3 (Chinese).
@@ -376,6 +379,7 @@ Once started, the terminal prints a link carrying an access token (`https://…/
 - **Use an https public address only**; otherwise API keys entered in the page travel in plaintext. The page must be served from the root address, not a subpath.
 - Anyone with the link can use everything on that computer, so keep it to yourself; the startup log also contains the access token.
 - A cloud computer usually has none of your subscription logins, so connect a model API in the page.
+- In remote mode the UI port is never switched automatically, because the platform maps a fixed port: if 5930 is taken, stop whatever holds it, or use `--port` to pick a port the platform exposes.
 
 ### Upgrading from v1
 
