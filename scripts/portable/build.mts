@@ -166,7 +166,7 @@ export function readmeText(version: string, target: Target): string {
     "",
     win ? "Requires 64-bit Windows 10 or later." : `Requires macOS ${MIN_MACOS} or later.`,
     `Start: double-click ${launcher}. A ${win ? "console" : "Terminal"} window opens and your browser goes to http://127.0.0.1:5930; close that window to quit.`,
-    "Port: if 5930 is taken by another program or reserved by the system, a free port is picked automatically; use the address shown in that window. If Vibe Research is already running, you are told to open that one instead.",
+    "Port: if 5930 is taken by another program or reserved by the system, a free port is picked automatically; use the address shown in that window. If Vibe Research is already running, you are told to open that one instead. After a switch, the model API settings and chat history on the \"接入 AI\" page need to be set up again at the new address (they live in the browser and are kept per address); once 5930 is free again, a restart brings back the original ones.",
     win
       ? "If Windows SmartScreen blocks it the first time: the package is not code-signed. Click \"More info\" -> \"Run anyway\"."
       : "If macOS says the developer cannot be verified: the package is not code-signed. In Terminal run xattr -dr com.apple.quarantine followed by this folder's path, then double-click again.",
