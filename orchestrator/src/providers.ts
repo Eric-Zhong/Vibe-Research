@@ -73,13 +73,27 @@ const RENAMED_PROVIDER_IDS: Readonly<Record<string, string>> = Object.freeze({
 export function renamedProviderHint(id: string): string | null {
   return Object.hasOwn(RENAMED_PROVIDER_IDS, id) ? RENAMED_PROVIDER_IDS[id]! : null;
 }
-/** URL 的共同边界:远程 HTTPS;HTTP 仅显式本机回环,不接受 URL 内凭据。 */
-export function providerUrlError(value: string): string | null {
+/**
+ * URL 的共同边界。
+ *
+ * 本机模式(remote=false,默认):允许 HTTPS 任意地址,也允许 HTTP —— 这是**本机产品**,
+ * 填 URL 的人就是这台机器的主人;"私有网关 / 本机推理服务"是文档化的正当用法,
+ * 明文 key 只在这台机器到它自己网络里的服务之间走,由主人自己承担。
+ *
+ * 远程模式(remote=true):强制 HTTPS,HTTP 只放行明确的本机回环(部署者在本机跑的推理服务),
+ * 否则拿到分享链接的人能借后台把 key 发到公网明文地址。
+ *
+ * 两种模式都不接受 URL 内凭据 / 查询串 / 片段。
+ */
+export function providerUrlError(value: string, remote = false): string | null {
   let url: URL;
   try { url = new URL(value); } catch { return "模型地址不是合法 URL"; }
   if (/[\\\s]/.test(value)) return "模型地址不能包含空白或反斜杠";
   if (url.username || url.password || url.search || url.hash) return "模型地址不能携带用户名密码、查询参数或片段;请把凭据填到 API Key";
   if (url.protocol === "https:") return null;
+  // 本机模式:HTTP 指向私有网关 / 本机推理服务是正当用法,放行
+  if (url.protocol === "http:" && !remote) return null;
+  // 远程模式:仅本机回环的 HTTP 放行(部署者本机推理),其余要走 HTTPS
   if (url.protocol === "http:" && /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(value)) return null;
   return "远程模型地址必须使用 HTTPS;HTTP 仅允许 localhost、127.0.0.1 或 [::1] 的本机服务";
 }
@@ -192,7 +206,7 @@ export function validateProfile(p: unknown, label: string): ProviderProfileFile 
   const prof = p as ProviderProfileFile;
   for (const u of [prof.base_url, prof.direct?.base_url]) {
     if (!u) continue;
-    const error = providerUrlError(u);
+    const error = providerUrlError(u, true);
     if (error) throw new Error(`${label}:${error}`);
     // 模板里有需要用户替换的占位(如 {WorkspaceId})。没换就直接发请求,会得到一个看不懂的 404/401
     const ph = /[{<]([A-Za-z_][A-Za-z0-9_]*)[}>]/.exec(u);

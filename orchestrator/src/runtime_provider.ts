@@ -129,9 +129,10 @@ export function resolveRuntimeProvider(
     throw new RuntimeProviderError("missing_model", "llm.model 是空的：要用模板的默认模型就不要传这个字段，否则请填写模型名");
   }
   const model = String(llm.model ?? "").trim();
+  const remote = baseEnv.VRA_REMOTE === "1";
   // 远程访问模式:页面里填的地址由拿到分享链接的人决定 —— 不许借后台去连这台机器自己或任何 IP 上的服务
   // (内网、云元数据)。只管页面传来的 baseURL;后台默认与模板自带的地址不经过这里。
-  if (base && baseEnv.VRA_REMOTE === "1") {
+  if (base && remote) {
     const why = remotePageBaseUrlError(base);
     if (why) throw new RuntimeProviderError("remote_base_url_forbidden", why);
   }
@@ -146,7 +147,7 @@ export function resolveRuntimeProvider(
     let profile;
     try {
       // baseURL 允许覆盖(私有网关 / 填占位符),交给 loadProviderProfile 在**校验之前**替换
-      profile = loadProviderProfile(repoRoot, dataRoot, id, base ? assertHttp(base) : undefined).profile;
+      profile = loadProviderProfile(repoRoot, dataRoot, id, base ? assertHttp(base, remote) : undefined).profile;
     } catch (e) {
       if (e instanceof RuntimeProviderError) throw e;
       const raw = e instanceof Error ? e.message : String(e);
@@ -178,8 +179,8 @@ function customEndpoint(name: string, base: string, key: string, model: string, 
   if (!base) throw new RuntimeProviderError("missing_base_url", "自定义端点必须填 Base URL");
   if (!key) throw new RuntimeProviderError("missing_key", "自定义端点必须填 API key");
   if (!model) throw new RuntimeProviderError("missing_model", "自定义端点必须填模型名");
-  // 与模板共用 URL 校验：远程必须 HTTPS，HTTP 只开放明确的本机地址。
-  const checked = assertHttp(base);
+  // 与模板共用 URL 校验：远程必须 HTTPS，HTTP 只开放明确的本机地址；本机模式放行私有网关。
+  const checked = assertHttp(base, baseEnv.VRA_REMOTE === "1");
   return {
     runtime: "api",
     api: Object.freeze({
@@ -311,11 +312,12 @@ export function resolveDirectProvider(
  * 🔴 报错**绝不回显原串**：不管凭据藏在 userinfo、query 还是路径里，只要不把 URL 拼进
  *    错误消息，它就不会一路回到前端、也不会被上层记下来。
  *
- * ⚠️ **刻意不做私网/回环封禁**：这是**本机产品**，填 URL 的人就是这台机器的主人；
- *    "私有网关 / 本机推理服务"是文档化的正当用法。
+ * ⚠️ **本机模式刻意不做私网/回环封禁**：这是**本机产品**，填 URL 的人就是这台机器的主人；
+ *    "私有网关 / 本机推理服务"是文档化的正当用法(明文 key 只在本机到自有服务之间走)。
+ *    远程模式(页面分享给外人)下换成严格 HTTPS,避免 key 经分享链接被发到公网明文地址。
  */
-function assertHttp(u: string): string {
-  const error = providerUrlError(u);
+function assertHttp(u: string, remote: boolean): string {
+  const error = providerUrlError(u, remote);
   if (error) throw new RuntimeProviderError("bad_base_url", error);
   return u;
 }
